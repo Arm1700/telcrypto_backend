@@ -1,0 +1,89 @@
+version: '3.8'
+
+services:
+  backend:
+    build: .:/
+    container_name: crypto-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+      - /app/node_modules
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=development
+      - DATABASE_URL=postgresql://user:password@postgres:5432/telcrypto_bot
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - crypto-network
+    restart: unless-stopped
+    command: npm run dev
+
+  frontend:
+    build: ../frontend
+    container_name: crypto-frontend
+    ports:
+      - "3000:3000"
+    volumes:
+      - ../frontend:/app
+      - /app/node_modules
+    environment:
+      - VITE_API_URL=http://localhost:8000
+      - VITE_TELEGRAM_BOT_USERNAME=${TELEGRAM_BOT_USERNAME}
+      - WATCHPACK_POLLING=true
+    depends_on:
+      - backend
+    networks:
+      - crypto-network
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:17-alpine
+    container_name: crypto-postgres
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: telcrypto_bot
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    networks:
+      - crypto-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d telcrypto_bot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: crypto-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    networks:
+      - crypto-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:
+
+networks:
+  crypto-network:
+    driver: bridge
