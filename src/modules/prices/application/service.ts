@@ -43,9 +43,11 @@ export class PriceServiceImpl implements PriceService {
               price: parseFloat(message.c),
               timestamp: message.E,
               change24h: parseFloat(message.P),
-              volume24h: parseFloat(message.v),
-              marketCap: parseFloat(message.q)
-            };
+              // Use quote volume (q) in USDT as $ volume; base volume (v) is amount of coins
+              volume24h: parseFloat(message.q),
+              // Binance ticker doesn't provide market cap; omit this field
+              // marketCap: undefined
+            } as CryptoPrice;
 
             logger.info(`Created price object:`, price);
             logger.info(`Saving price for ${price.symbol}: $${price.price} (${price.change24h}%)`);

@@ -1,64 +1,85 @@
-version: '3.8'
+version: "3.9"
 
 services:
   backend:
-    build: .:/
-    container_name: crypto-backend
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NODE_ENV: development
+    container_name: telcrypto-backend
     ports:
       - "8000:8000"
     volumes:
       - .:/app
       - /app/node_modules
     env_file:
-      - .env
+      - ../backend/.env
     environment:
       - NODE_ENV=development
-      - DATABASE_URL=postgresql://user:password@postgres:5432/telcrypto_bot
+      - POSTGRES_HOST=${POSTGRES_HOST}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_PORT=${POSTGRES_PORT}
       - REDIS_URL=redis://redis:6379
+      - FRONTEND_URL=${FRONTEND_URL}
+      - SESSION_SECRET=${SESSION_SECRET}
+      - JWT_SECRET=${JWT_SECRET}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_BOT_USERNAME=${TELEGRAM_BOT_USERNAME}
+      - BINANCE_WS_URL=${BINANCE_WS_URL}
+      - BINANCE_API_URL=${BINANCE_API_URL}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
     networks:
-      - crypto-network
+      - telcrypto-network
     restart: unless-stopped
-    command: npm run dev
+    command: sh -c "npm ci && npm run dev"
 
   frontend:
-    build: ../frontend
-    container_name: crypto-frontend
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+    container_name: telcrypto-frontend
     ports:
       - "3000:3000"
     volumes:
       - ../frontend:/app
       - /app/node_modules
+    env_file:
+      - ../frontend/.env
     environment:
       - VITE_API_URL=http://localhost:8000
       - VITE_TELEGRAM_BOT_USERNAME=${TELEGRAM_BOT_USERNAME}
       - WATCHPACK_POLLING=true
+      - VITE_WS_URL=ws://localhost:8000
     depends_on:
       - backend
     networks:
-      - crypto-network
+      - telcrypto-network
     restart: unless-stopped
+    command: npm run dev -- --host 0.0.0.0
 
   postgres:
     image: postgres:17-alpine
-    container_name: crypto-postgres
+    container_name: telcrypto-postgres
     environment:
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: telcrypto_bot
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./initdb:/docker-entrypoint-initdb.d
     ports:
       - "5432:5432"
     networks:
-      - crypto-network
+      - telcrypto-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U user -d telcrypto_bot"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -66,13 +87,13 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: crypto-redis
+    container_name: telcrypto-redis
     ports:
       - "6379:6379"
     volumes:
       - redisdata:/data
     networks:
-      - crypto-network
+      - telcrypto-network
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -85,5 +106,5 @@ volumes:
   redisdata:
 
 networks:
-  crypto-network:
+  telcrypto-network:
     driver: bridge

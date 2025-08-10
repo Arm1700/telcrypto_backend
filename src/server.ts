@@ -7,55 +7,32 @@ import dotenv from 'dotenv';
 import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 
-// Import modules
 import authRoutes from './modules/auth/presentation/routes';
 import priceRoutes from './modules/prices/presentation/routes';
 import marketRoutes from './modules/market/presentation/routes';
 
-// Import shared
 import logger from './shared/logger/index';
 import pool from './shared/database/postgres';
 import redisClient from './shared/database/redis';
 import { PriceServiceImpl } from './modules/prices/application/service';
+import { MarketService } from './modules/market/application/service';
 import { addWebSocketConnection, removeWebSocketConnection, sendInitialPrices } from './shared/websocket';
 
-// Load environment variables
 dotenv.config();
 
 const app = express();
 const server = createServer(app);
 const wss = new WebSocketServer({ 
   server
-  // Temporarily disable CORS check for debugging
-  // verifyClient: (info: any) => {
-  //   const origin = info.origin || info.req.headers.origin;
-  //   const allowedOrigin = process.env.FRONTEND_URL || 'http://localhost:3000';
-  //   
-  //   logger.info(`WebSocket connection attempt from origin: ${origin}`);
-  //   logger.info(`Allowed origin: ${allowedOrigin}`);
-  //   logger.info(`Origin comparison: ${origin} === ${allowedOrigin} = ${origin === allowedOrigin}`);
-  //   logger.info(`Info object keys:`, Object.keys(info));
-  //   logger.info(`Info.req headers:`, info.req?.headers);
-  //   
-  //   if (origin === allowedOrigin) {
-  //     logger.info('WebSocket connection allowed');
-  //     return true;
-  //   } else {
-  //     logger.warn(`WebSocket connection rejected from origin: ${origin}`);
-  //     return false;
-  //   }
-  // }
 });
 const PORT = process.env.PORT || 8000;
 
-// WebSocket connection handler
 wss.on('connection', (ws: WebSocket) => {
   logger.info('New WebSocket connection established');
   logger.info('WebSocket readyState:', ws.readyState);
   
   addWebSocketConnection(ws);
 
-  // Send initial prices with a small delay to ensure Redis is ready
   setTimeout(() => {
     logger.info('Getting initial prices for new WebSocket connection');
     const priceService = new PriceServiceImpl();
@@ -69,7 +46,6 @@ wss.on('connection', (ws: WebSocket) => {
       }
     }).catch(error => {
       logger.error('Error sending initial prices:', error);
-      // Don't disconnect the client, just log the error
     });
   }, 1000);
 
@@ -86,17 +62,13 @@ wss.on('connection', (ws: WebSocket) => {
   });
 });
 
-// Rate limiting
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
-  message: {
-    success: false,
-    error: 'Too many requests from this IP, please try again later.'
-  }
+  windowMs: 15 * 60 * 1000,
+  max: 1000,
+  standardHeaders: true,
+  legacyHeaders: false,
 });
 
-// Middleware
 app.use(helmet());
 app.use(cors({
   origin: process.env.FRONTEND_URL || 'http://localhost:3000',
@@ -107,7 +79,8 @@ app.use(cors({
 app.use(morgan('combined', { stream: { write: (message) => logger.info(message.trim()) } }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
-app.use(limiter);
+// Apply limiter only to public GET APIs; skip internal and websocket
+app.use(['/api/market', '/api/prices', '/api/auth'], limiter);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -118,14 +91,10 @@ app.get('/health', (req, res) => {
   });
 });
 
-// Preflight handled by cors middleware above; explicit '*' handler is not needed in Express 5
-
-// API routes
 app.use('/api/auth', authRoutes);
 app.use('/api/prices', priceRoutes);
 app.use('/api/market', marketRoutes);
 
-// 404 handler (catch-all without path pattern)
 app.use((req, res) => {
   res.status(404).json({
     success: false,
@@ -133,7 +102,6 @@ app.use((req, res) => {
   });
 });
 
-// Error handler
 app.use((error: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
   logger.error('Unhandled error:', error);
   res.status(500).json({
@@ -142,28 +110,26 @@ app.use((error: any, req: express.Request, res: express.Response, next: express.
   });
 });
 
-// Initialize services
 async function initializeServices() {
   try {
-    // Connect to Redis
     await redisClient.connect();
     logger.info('Redis connected successfully');
 
-    // Test PostgreSQL connection
     await pool.query('SELECT NOW()');
     logger.info('PostgreSQL connected successfully');
 
-    // Start price service WebSocket connection
-    logger.info('Starting price service WebSocket connection');
     const priceService = new PriceServiceImpl();
     priceService.startWebSocketConnection();
-    logger.info('Price service WebSocket connection started');
 
-    // Start server
-    server.listen(PORT, () => {
+    const marketService = new MarketService();
+    await marketService.prefetchAndCache();
+    marketService.startScheduler(60_000);
+    marketService.startCapsScheduler(120_000);
+
+    server.listen(Number(PORT), '0.0.0.0', () => {
       logger.info(`Server is running on port ${PORT}`);
-      logger.info(`WebSocket server is ready on ws://localhost:${PORT}`);
-      logger.info(`HTTP server is ready on http://localhost:${PORT}`);
+      logger.info(`WebSocket server is ready on ws://0.0.0.0:${PORT}`);
+      logger.info(`HTTP server is ready on http://0.0.0.0:${PORT}`);
     }).on('error', (error) => {
       logger.error('Failed to start server:', error);
       process.exit(1);

@@ -4,15 +4,18 @@ WORKDIR /app
 
 COPY package*.json ./
 
-# Устанавливаем все зависимости, включая devDependencies
 RUN npm install
 
 COPY . .
 
-RUN npm run build
+ARG NODE_ENV=development
+ENV NODE_ENV=${NODE_ENV}
 
-# Можно удалить devDependencies после сборки, если хочется оптимизировать размер
-RUN npm prune --production
+RUN if [ "$NODE_ENV" = "production" ]; then \
+      npm run build && npm prune --production; \
+    else \
+      echo "Dev mode: skip build/prune in image"; \
+    fi
 
 EXPOSE 8000
 

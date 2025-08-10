@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { User } from '../types';
+import logger from '../logger';
 
 declare global {
   namespace Express {
@@ -36,7 +37,7 @@ export const optionalAuth = (req: Request, res: Response, next: NextFunction): v
       const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key') as User;
       req.user = decoded;
     } catch (error) {
-      // Token is invalid, but we continue without user
+      logger.error('Invalid token:', error);
     }
   }
   
